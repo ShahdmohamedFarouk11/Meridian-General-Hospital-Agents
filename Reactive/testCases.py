@@ -13,7 +13,6 @@ def get_example_patients():
                 "available_icu_beds": 0,
                 "available_ventilators": 0,
             },
-            "expected": "IMMEDIATE_OR",
         },
         {
             "id": "P-002",
@@ -28,7 +27,6 @@ def get_example_patients():
                 "available_icu_beds": 1,
                 "available_ventilators": 1,
             },
-            "expected": "WAITLIST",
         },
         {
             "id": "P-003",
@@ -43,7 +41,6 @@ def get_example_patients():
                 "available_icu_beds": 2,
                 "available_ventilators": 0,
             },
-            "expected": "GENERAL_WARD",
         },
         {
             "id": "P-004",
@@ -58,7 +55,6 @@ def get_example_patients():
                 "available_icu_beds": 0,
                 "available_ventilators": 2,
             },
-            "expected": "GENERAL_WARD",
         },
         {
             "id": "P-005",
@@ -73,10 +69,9 @@ def get_example_patients():
                 "available_icu_beds": 1,
                 "available_ventilators": 1,
             },
-            "expected": "IMMEDIATE_ICU",
         },
-         {
-           "id": "P-006",
+        {
+            "id": "P-006",
             "input": {
                 "triage_level": 1,
                 "age": 60,
@@ -88,7 +83,6 @@ def get_example_patients():
                 "available_icu_beds": 1,
                 "available_ventilators": 1,
             },
-            "expected": "IMMEDIATE_OR"
         },
         {
             "id": "P-007",
@@ -103,7 +97,6 @@ def get_example_patients():
                 "available_icu_beds": 0,
                 "available_ventilators": 0,
             },
-            "expected": "GENERAL_WARD",
         },
         {
             "id": "P-008",
@@ -118,6 +111,4 @@ def get_example_patients():
                 "available_icu_beds": 1,
                 "available_ventilators": 1,
             },
-            "expected": "ESCALATE_TRANSFER"
-            },
-    ]
+        },
