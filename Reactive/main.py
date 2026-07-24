@@ -1,13 +1,14 @@
 from rules import decide_patient
-from testCases import test_cases
+from testCases import get_example_patients
 
+test_cases = get_example_patients()
 passed = 0
 
 for test in test_cases:
     result = decide_patient(**test["input"])
 
-    print("-"*20)
-    print(test["name"])
+    print("-" * 30)
+    print(test["id"])
     print("Expected:", test["expected"])
     print("Actual  :", result)
 
@@ -17,5 +18,5 @@ for test in test_cases:
     else:
         print("FAIL")
 
-print("-"*20)
+print("-" * 30)
 print(f"Passed {passed}/{len(test_cases)} Test Cases")
