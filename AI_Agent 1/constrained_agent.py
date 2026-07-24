@@ -1,11 +1,9 @@
-# constrained_agent.py
 import os
 import time
 import json
 from enum import Enum
 from typing import Literal, Dict, Any, Optional
 from dotenv import load_dotenv
-
 from pydantic import BaseModel, Field
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
@@ -38,7 +36,7 @@ class ConstrainedAgentStep(BaseModel):
     action: AllowedActions = Field(description="Action to execute next.")
     action_input_str: str = Field(
         default="{}", 
-        description="Parameters for the action as a valid JSON string (e.g. '{\"patient_id\": \"P-001\"}'). Use lowercase true/false."
+        description="Parameters for the action as a valid JSON string (e.g. '{\"triage_level\": 1, \"patient_id\": \"P-001\"}'). Use lowercase true/false for booleans."
     )
 
 # Using llama-3.3-70b-versatile for precise tool output syntax
@@ -57,14 +55,15 @@ tools_map = {
 SYSTEM_PROMPT = """You are an Emergency Hospital Triage AI Agent.
 
 STRICT EXECUTION PROTOCOL:
-1. First step: Use 'assign_triage_level'.
-2. Second step: Use 'check_hospital_resources'.
+1. First step: Use 'assign_triage_level'. Pass parameters extracted from Current Task (e.g., triage_level, patient_id).
+2. Second step: Use 'check_hospital_resources'. Pass parameters extracted from Current Task (e.g., available_doctors, available_or_rooms, available_icu_beds, available_ventilators).
 3. Third step: Choose 'final_decision'.
 
 RULES:
 - NEVER execute an action that is ALREADY listed in Executed Actions.
+- Extract relevant clinical and resource variables from Current Task into `action_input_str`.
 - If both 'assign_triage_level' AND 'check_hospital_resources' are done, your ONLY allowed next action is 'final_decision'.
-- Format `action_input_str` as valid JSON (use lowercase true/false for booleans)."""
+- Format `action_input_str` as a valid JSON string (use lowercase true/false for booleans and numbers for integers)."""
 
 prompt = ChatPromptTemplate.from_messages([
     ("system", SYSTEM_PROMPT),
@@ -109,6 +108,7 @@ def run_constrained_agent(user_query: str, max_steps: int = 5):
         print(f"Thought: {step_output.thought}")
         print(f"Urgency: {step_output.urgency_level}")
         print(f"Action Chosen: {step_output.action.value}")
+        print(f"Input JSON: {step_output.action_input_str}")
 
         action_name = step_output.action.value
 
