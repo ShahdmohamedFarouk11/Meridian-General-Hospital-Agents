@@ -1,8 +1,9 @@
 # constrained_agent.py
 import os
 import time
+import json
 from enum import Enum
-from typing import Literal
+from typing import Literal, Dict, Any, Optional
 from dotenv import load_dotenv
 
 from pydantic import BaseModel, Field
@@ -30,12 +31,17 @@ class AllowedActions(str, Enum):
     ESCALATE_TO_HUMAN = "escalate_to_human"
     FINAL_DECISION = "final_decision"
 
+# Pydantic schema strictly defining types
 class ConstrainedAgentStep(BaseModel):
-    thought: str = Field(description="Clinical reasoning and strategic planning for current step.")
+    thought: str = Field(description="Clinical reasoning for the current step.")
     urgency_level: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"] = Field(description="Patient urgency level.")
-    action: AllowedActions = Field(description="Strictly allowed action to execute next.")
-    action_input: dict = Field(default_factory=dict, description="Parameters required for selected action.")
+    action: AllowedActions = Field(description="Action to execute next.")
+    action_input_str: str = Field(
+        default="{}", 
+        description="Parameters for the action as a valid JSON string (e.g. '{\"patient_id\": \"P-001\"}'). Use lowercase true/false."
+    )
 
+# Using llama-3.3-70b-versatile for precise tool output syntax
 llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.0)
 structured_llm = llm.with_structured_output(ConstrainedAgentStep)
 
@@ -48,36 +54,63 @@ tools_map = {
     AllowedActions.ALLOCATE_RESOURCE: allocate_resource,
 }
 
-SYSTEM_PROMPT = """You are a Constrained Hospital Emergency Triage AI Agent.
-Strict Rules:
-1. NEVER repeat an action that has already succeeded in the Execution History.
-2. Complete the user request using the minimal necessary steps.
-3. Once all required tasks (triage, history, resource check, or allocation) are completed, you MUST choose action='final_decision'.
-4. Do not loop continuously. Move to 'final_decision' as soon as the core user instructions are fulfilled."""
+SYSTEM_PROMPT = """You are an Emergency Hospital Triage AI Agent.
+
+STRICT EXECUTION PROTOCOL:
+1. First step: Use 'assign_triage_level'.
+2. Second step: Use 'check_hospital_resources'.
+3. Third step: Choose 'final_decision'.
+
+RULES:
+- NEVER execute an action that is ALREADY listed in Executed Actions.
+- If both 'assign_triage_level' AND 'check_hospital_resources' are done, your ONLY allowed next action is 'final_decision'.
+- Format `action_input_str` as valid JSON (use lowercase true/false for booleans)."""
 
 prompt = ChatPromptTemplate.from_messages([
     ("system", SYSTEM_PROMPT),
-    ("user", "Execution History:\n{history}\n\nCurrent Task: {input}")
+    ("user", "Executed Actions:\n{executed_actions}\n\nExecution History:\n{history}\n\nCurrent Task: {input}")
 ])
 
-def run_constrained_agent(user_query: str, max_steps: int = 8):
+def run_constrained_agent(user_query: str, max_steps: int = 5):
     history = []
+    executed_actions = set()
     print(f"\n[Task Started]: {user_query}\n" + "-" * 50)
 
     for step_num in range(1, max_steps + 1):
         history_text = "\n".join(history) if history else "None"
-        formatted_prompt = prompt.format_messages(history=history_text, input=user_query)
+        executed_text = ", ".join(executed_actions) if executed_actions else "None"
+        
+        formatted_prompt = prompt.format_messages(
+            executed_actions=executed_text, 
+            history=history_text, 
+            input=user_query
+        )
 
-        try:
-            step_output = structured_llm.invoke(formatted_prompt)
-        except Exception as e:
-            print(f"API Error: {e}")
+        step_output = None
+        # Retries for API calls / rate limits
+        for attempt in range(3):
+            try:
+                step_output = structured_llm.invoke(formatted_prompt)
+                break
+            except Exception as e:
+                err_msg = str(e)
+                if "429" in err_msg:
+                    print(f"Rate limit hit. Retrying in 3 seconds... (Attempt {attempt+1})")
+                    time.sleep(3)
+                else:
+                    print(f"Invocation error: {e}")
+                    time.sleep(1)
+
+        if not step_output:
+            print("Failed to get response from Model. Terminating run.")
             break
 
         print(f"\n--- Step {step_num} ---")
         print(f"Thought: {step_output.thought}")
         print(f"Urgency: {step_output.urgency_level}")
         print(f"Action Chosen: {step_output.action.value}")
+
+        action_name = step_output.action.value
 
         if step_output.action == AllowedActions.FINAL_DECISION:
             print("\n[FINAL DECISION REACHED]")
@@ -87,22 +120,31 @@ def run_constrained_agent(user_query: str, max_steps: int = 8):
             print("\n[ESCALATED TO HUMAN DOCTOR]")
             return f"Escalated to doctor: {step_output.thought}"
 
+        # Hard guardrail against duplicate tools
+        if action_name in executed_actions:
+            warning_msg = f"Action '{action_name}' was ALREADY executed! You MUST select 'final_decision' or a different action."
+            print(f"System Enforcement: {warning_msg}")
+            history.append(warning_msg)
+            continue
+
         tool_func = tools_map.get(step_output.action)
         if tool_func:
+            # Parse parameters safely
             try:
-                observation = tool_func(**step_output.action_input)
+                action_args = json.loads(step_output.action_input_str) if step_output.action_input_str else {}
+            except Exception:
+                action_args = {}
+
+            try:
+                observation = tool_func(**action_args)
                 print(f"Observation: {observation}")
-                history.append(f"Action '{step_output.action.value}' succeeded with observation: {observation}")
+                history.append(f"Action '{action_name}' executed. Result: {observation}")
+                executed_actions.add(action_name)
             except Exception as e:
-                error_msg = f"Action '{step_output.action.value}' failed with error: {str(e)}"
+                error_msg = f"Action '{action_name}' failed with error: {str(e)}"
                 print(f"Error Caught: {error_msg}")
                 history.append(error_msg)
 
         time.sleep(1)
 
     return "Safety Timeout: Reached maximum allowed steps."
-
-if __name__ == "__main__":
-    case = "Patient P-102 has severe chest trauma. Assign triage level, check resources, and allocate ICU bed."
-    result = run_constrained_agent(case)
-    print(f"\nOutcome: {result}")
